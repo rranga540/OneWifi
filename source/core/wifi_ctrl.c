@@ -1522,6 +1522,8 @@ int init_wifi_ctrl(wifi_ctrl_t *ctrl)
         return RETURN_ERR;
     }
 
+    private_cfg_sem_init(ctrl);
+
     ctrl->events_bus_data.events_bus_queue = queue_create();
     if (ctrl->events_bus_data.events_bus_queue == NULL) {
         deinit_wifi_ctrl(ctrl);
@@ -2357,6 +2359,77 @@ bool hotspot_cfg_sem_wait_duration(uint32_t time_in_sec)
     ctrl->hotspot_sem_param.is_init = false;
     pthread_mutex_destroy(&ctrl->hotspot_sem_param.lock);
     pthread_cond_destroy(&ctrl->hotspot_sem_param.cond);
+
+    return status;
+}
+
+void private_cfg_sem_init(wifi_ctrl_t *ctrl)
+{
+    pthread_condattr_t cond_attr;
+
+    pthread_condattr_init(&cond_attr);
+    pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC);
+    pthread_cond_init(&ctrl->private_sem_param.cond, &cond_attr);
+    pthread_condattr_destroy(&cond_attr);
+    pthread_mutex_init(&ctrl->private_sem_param.lock, NULL);
+    ctrl->private_sem_param.waiting = false;
+    ctrl->private_sem_param.completed = false;
+    ctrl->private_sem_param.cfg_status = false;
+}
+
+/* Must be called before the private blob is pushed to the ctrl queue so that
+ * a result posted by the ctrl thread before the caller starts waiting is not lost. */
+void private_cfg_sem_arm(void)
+{
+    wifi_ctrl_t *ctrl = (wifi_ctrl_t *)get_wifictrl_obj();
+
+    pthread_mutex_lock(&ctrl->private_sem_param.lock);
+    ctrl->private_sem_param.waiting = true;
+    ctrl->private_sem_param.completed = false;
+    ctrl->private_sem_param.cfg_status = false;
+    pthread_mutex_unlock(&ctrl->private_sem_param.lock);
+}
+
+void private_cfg_sem_signal(bool status)
+{
+    wifi_ctrl_t *ctrl = (wifi_ctrl_t *)get_wifictrl_obj();
+
+    pthread_mutex_lock(&ctrl->private_sem_param.lock);
+    if (ctrl->private_sem_param.waiting == true && ctrl->private_sem_param.completed == false) {
+        ctrl->private_sem_param.cfg_status = status;
+        ctrl->private_sem_param.completed = true;
+        pthread_cond_signal(&ctrl->private_sem_param.cond);
+    }
+    pthread_mutex_unlock(&ctrl->private_sem_param.lock);
+}
+
+bool private_cfg_sem_wait_duration(uint32_t time_in_sec)
+{
+    struct timespec ts;
+    int ret = 0;
+    bool status = false;
+    wifi_ctrl_t *ctrl = (wifi_ctrl_t *)get_wifictrl_obj();
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    ts.tv_sec += time_in_sec;
+
+    pthread_mutex_lock(&ctrl->private_sem_param.lock);
+    while (ctrl->private_sem_param.completed == false) {
+        ret = pthread_cond_timedwait(&ctrl->private_sem_param.cond,
+            &ctrl->private_sem_param.lock, &ts);
+        if (ret != 0) {
+            break;
+        }
+    }
+    if (ctrl->private_sem_param.completed == true) {
+        status = ctrl->private_sem_param.cfg_status;
+    } else {
+        wifi_util_error_print(WIFI_CTRL, "%s:%d private blob apply wait failed ret:%d timeout:%u sec\n",
+            __func__, __LINE__, ret, time_in_sec);
+    }
+    ctrl->private_sem_param.waiting = false;
+    ctrl->private_sem_param.completed = false;
+    pthread_mutex_unlock(&ctrl->private_sem_param.lock);
 
     return status;
 }

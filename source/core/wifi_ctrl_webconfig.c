@@ -2882,12 +2882,16 @@ webconfig_error_t webconfig_ctrl_apply(webconfig_subdoc_t *doc, webconfig_subdoc
             } else {
                 if (check_wifi_csa_sched_timeout_active_status(ctrl) == true) {
                     if (push_data_to_apply_pending_queue(data) != RETURN_OK) {
+                        private_cfg_sem_signal(false);
                         return webconfig_error_apply;
                     }
                 } else {
                     ctrl->webconfig_state |= ctrl_webconfig_state_vap_private_cfg_rsp_pending;
                     webconfig_analytic_event_data_to_hal_apply(data);
                     ret = webconfig_hal_private_vap_apply(ctrl, &data->u.decoded);
+                    private_cfg_sem_signal((ret == RETURN_OK) ? true : false);
+                    wifi_util_info_print(WIFI_CTRL, "%s:%d private blob cfg status:%d\n", __func__,
+                        __LINE__, ret);
                     if (ret != RETURN_OK) {
                         static uint8_t max_re_apply_retry = 0;
                         if (max_re_apply_retry < MAX_VAP_RE_CFG_APPLY_RETRY) {

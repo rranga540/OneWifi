@@ -97,6 +97,7 @@ extern "C" {
 
 #define MAX_HOTSPOT_BLOB_SET_TIMEOUT             100
 #define MAX_WEBCONFIG_HOTSPOT_BLOB_SET_TIMEOUT   120
+#define MAX_PRIVATE_BLOB_SET_TIMEOUT             100
 #define MAX_VAP_RE_CFG_APPLY_RETRY     2
 
 //This is a dummy string if the value is not passed.
@@ -242,6 +243,14 @@ typedef struct hotspot_cfg_sem_param {
     bool cfg_status;
 } hotspot_cfg_sem_param_t;
 
+typedef struct private_cfg_sem_param {
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
+    bool waiting;   /* a private blob set is waiting for the apply result */
+    bool completed; /* ctrl thread has posted the apply result */
+    bool cfg_status;
+} private_cfg_sem_param_t;
+
 typedef struct wifi_ctrl {
     bool                exit_ctrl;
     queue_t             *queue;
@@ -292,6 +301,7 @@ typedef struct wifi_ctrl {
     int                 speed_test_running;
     events_bus_data_t   events_bus_data;
     hotspot_cfg_sem_param_t hotspot_sem_param;
+    private_cfg_sem_param_t private_sem_param;
     bool                rf_status_down;
     bool                hotspot_client_dhcp_failure_subscribed;
     bool                multiap_sta_enabled;
@@ -468,6 +478,10 @@ int webconfig_send_full_associate_status(wifi_ctrl_t *ctrl);
 void start_station_vaps(bool is_private, bool enable);
 bool hotspot_cfg_sem_wait_duration(uint32_t time_in_sec);
 void hotspot_cfg_sem_signal(bool status);
+void private_cfg_sem_init(wifi_ctrl_t *ctrl);
+void private_cfg_sem_arm(void);
+bool private_cfg_sem_wait_duration(uint32_t time_in_sec);
+void private_cfg_sem_signal(bool status);
 bus_error_t publish_endpoint_status(wifi_ctrl_t *ctrl, int connection_status);
 int publish_endpoint_enable(void);
 int get_mld_mac_from_link_mac(mac_address_t in_addr, mac_address_t mld_addr);
